@@ -20,7 +20,7 @@ jobs:
           --header "x-client-secret: ${{ secrets.CF_CLIENT_SECRET }}" \
           --data '{
             "subscription_id": "devstudio_subs_7432043033600072437",
-            "payment_id": "CRahul_8971520311",
+            "payment_id": "Rahul_8971520311-1",
             "payment_type": "CHARGE",
             "payment_amount": 1,
             "payment_schedule_date": "2026-03-18T10:00:00+05:30"
