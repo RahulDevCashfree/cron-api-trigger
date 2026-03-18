@@ -2,7 +2,7 @@ name: Trigger Subscription Charge
 
 on:
   schedule:
-    - cron: "30 23 17 3 *"   # 18 March 5:00 AM IST
+    - cron: "30 19 18 3 *"   # 19 March 2026, 01:00 AM IST
   workflow_dispatch:
 
 jobs:
@@ -12,16 +12,18 @@ jobs:
     steps:
       - name: Call Cashfree API
         run: |
+          PAYMENT_ID="Rahul_$(date +%s)"
+
           curl --location 'https://api.cashfree.com/pg/subscriptions/pay' \
           --header 'accept: application/json' \
           --header 'content-type: application/json' \
           --header 'x-api-version: 2025-01-01' \
           --header "x-client-id: ${{ secrets.CF_CLIENT_ID }}" \
           --header "x-client-secret: ${{ secrets.CF_CLIENT_SECRET }}" \
-          --data '{
-            "subscription_id": "devstudio_subs_7432043033600072437",
-            "payment_id": "Rahul_8971520311-1",
-            "payment_type": "CHARGE",
-            "payment_amount": 1,
-            "payment_schedule_date": "2026-03-18T10:00:00+05:30"
-          }'
+          --data "{
+            \"subscription_id\": \"devstudio_subs_7432043033600072437\",
+            \"payment_id\": \"$PAYMENT_ID\",
+            \"payment_type\": \"CHARGE\",
+            \"payment_amount\": 1,
+            \"payment_schedule_date\": \"2026-03-19T06:00:00+05:30\"
+          }"
