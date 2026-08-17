@@ -1,29 +1,97 @@
-name: Trigger Subscription Charge
+name: Trigger Controlled Subscription Charge
 
 on:
   schedule:
-    - cron: "30 19 18 3 *"   # 19 March 2026, 01:00 AM IST
+    # notification_initiated_time: 2026-08-17T13:14:15+05:30
+    # minimum charge time +24h:   2026-08-18T13:14:15+05:30
+    # NPCI blackout windows IST:  10:00-13:00 and 17:00-21:30
+    # Final charge time IST:      2026-08-18T13:14:15+05:30
+    # GitHub cron uses UTC:       2026-08-18T07:44:15Z
+    # Cron is minute precision, so the job sleeps TARGET_SECOND_UTC seconds.
+    - cron: "44 7 18 8 *"
   workflow_dispatch:
+    inputs:
+      payment_id:
+        description: "Cashfree payment_id"
+        required: true
+        default: "Payment_controlled_3"
+      execution_id:
+        description: "Merchant execution_id"
+        required: true
+        default: "Payment_controlled_3_exec_1"
+      cashfree_env:
+        description: "Cashfree environment"
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - production
+          - sandbox
 
 jobs:
   hit-api:
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Call Cashfree API
-        run: |
-          PAYMENT_ID="Rahul_$(date +%s)"
+    env:
+      API_VERSION: "2026-01-01"
+      DEFAULT_ENVIRONMENT: "production"
+      DEFAULT_PAYMENT_ID: "Payment_controlled_3"
+      DEFAULT_EXECUTION_ID: "Payment_controlled_3_exec_1"
+      TARGET_DATE_UTC: "2026-08-18"
+      TARGET_SECOND_UTC: "15"
 
-          curl --location 'https://api.cashfree.com/pg/subscriptions/pay' \
-          --header 'accept: application/json' \
-          --header 'content-type: application/json' \
-          --header 'x-api-version: 2025-01-01' \
-          --header "x-client-id: ${{ secrets.CF_CLIENT_ID }}" \
-          --header "x-client-secret: ${{ secrets.CF_CLIENT_SECRET }}" \
-          --data "{
-            \"subscription_id\": \"devstudio_subs_7432043033600072437\",
-            \"payment_id\": \"$PAYMENT_ID\",
-            \"payment_type\": \"CHARGE\",
-            \"payment_amount\": 1,
-            \"payment_schedule_date\": \"2026-03-19T06:00:00+05:30\"
-          }"
+    steps:
+      - name: Call Cashfree controlled execution API
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PAYMENT_ID="${{ github.event.inputs.payment_id || env.DEFAULT_PAYMENT_ID }}"
+          EXECUTION_ID="${{ github.event.inputs.execution_id || env.DEFAULT_EXECUTION_ID }}"
+          CASHFREE_ENV="${{ github.event.inputs.cashfree_env || env.DEFAULT_ENVIRONMENT }}"
+
+          if [ "$CASHFREE_ENV" = "sandbox" ]; then
+            BASE_URL="https://sandbox.cashfree.com/pg"
+          else
+            BASE_URL="https://api.cashfree.com/pg"
+          fi
+
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            TODAY_UTC="$(date -u +%F)"
+            if [ "$TODAY_UTC" != "$TARGET_DATE_UTC" ]; then
+              echo "Skipping scheduled run for ${TODAY_UTC}. Target date is ${TARGET_DATE_UTC}."
+              exit 0
+            fi
+
+            sleep "$TARGET_SECOND_UTC"
+          fi
+
+          IDEMPOTENCY_KEY="controlled-execution-${PAYMENT_ID}-${EXECUTION_ID}"
+
+          echo "Calling Cashfree controlled execution for payment_id=${PAYMENT_ID}, execution_id=${EXECUTION_ID}"
+
+          RESPONSE_FILE="$(mktemp)"
+          HTTP_STATUS="$(
+            curl --silent --show-error --location \
+              --request POST "${BASE_URL}/subscriptions/pay/controlled/execute-mandate" \
+              --header "accept: application/json" \
+              --header "content-type: application/json" \
+              --header "x-api-version: ${API_VERSION}" \
+              --header "x-client-id: ${{ secrets.CF_CLIENT_ID }}" \
+              --header "x-client-secret: ${{ secrets.CF_CLIENT_SECRET }}" \
+              --header "x-idempotency-key: ${IDEMPOTENCY_KEY}" \
+              --data "{
+                \"payment_id\": \"${PAYMENT_ID}\",
+                \"execution_id\": \"${EXECUTION_ID}\"
+              }" \
+              --output "$RESPONSE_FILE" \
+              --write-out "%{http_code}"
+          )"
+
+          echo "HTTP status: ${HTTP_STATUS}"
+          cat "$RESPONSE_FILE"
+          echo
+
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            exit 1
+          fi
